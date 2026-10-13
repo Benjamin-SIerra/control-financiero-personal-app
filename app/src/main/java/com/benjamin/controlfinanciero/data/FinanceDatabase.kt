@@ -34,7 +34,7 @@ data class FixedExpense(@PrimaryKey(autoGenerate=true) val id:Long=0,val title:S
 @Entity(tableName="cards",indices=[Index("name",unique=true)]) data class CreditCard(@PrimaryKey(autoGenerate=true) val id:Long=0,val name:String,val limitMinor:Long,val usedMinor:Long=0,val cutDay:Int,val dueDay:Int,val salaryFunded:Boolean,val expectedPaymentMinor:Long=0,val currency:String="MXN",val exchangeRate:Double=1.0)
 @Entity(tableName="expenses",indices=[Index("dateEpochMillis"),Index("cardId")],foreignKeys=[ForeignKey(entity=CreditCard::class,parentColumns=["id"],childColumns=["cardId"],onDelete=ForeignKey.SET_NULL)]) data class Expense(@PrimaryKey(autoGenerate=true) val id:Long=0,val concept:String,val category:String,val amountMinor:Long,val currency:String,val exchangeRate:Double,val dateEpochMillis:Long=System.currentTimeMillis(),val cardId:Long?=null,val note:String="")
 @Entity(tableName="card_payments",indices=[Index("cardId"),Index("dateEpochMillis")],foreignKeys=[ForeignKey(entity=CreditCard::class,parentColumns=["id"],childColumns=["cardId"],onDelete=ForeignKey.CASCADE)]) data class CardPayment(@PrimaryKey(autoGenerate=true) val id:Long=0,val cardId:Long,val amountMinor:Long,val dateEpochMillis:Long=System.currentTimeMillis())
-@Entity(tableName="goals",indices=[Index("deadlineEpochDay")]) data class SavingsGoal(@PrimaryKey(autoGenerate=true) val id:Long=0,val name:String,val targetMinor:Long,val savedMinor:Long=0,val currency:String,val exchangeRate:Double=1.0,val deadlineEpochDay:Long)
+@Entity(tableName="goals",indices=[Index("deadlineEpochDay")]) data class SavingsGoal(@PrimaryKey(autoGenerate=true) val id:Long=0,val name:String,val targetMinor:Long,val savedMinor:Long=0,val currency:String,val exchangeRate:Double=1.0,val deadlineEpochDay:Long,val status:String="ACTIVE")
 
 @Dao interface FinanceDao {
  @Query("SELECT * FROM profile WHERE id=1") fun profile():Flow<Profile?>
@@ -59,11 +59,13 @@ data class FixedExpense(@PrimaryKey(autoGenerate=true) val id:Long=0,val title:S
  @Query("DELETE FROM cards WHERE id=:id") suspend fun deleteCard(id:Long)
  @Query("SELECT * FROM goals ORDER BY deadlineEpochDay") fun goals():Flow<List<SavingsGoal>>
  @Insert suspend fun addGoal(g:SavingsGoal):Long
- @Query("UPDATE goals SET savedMinor=savedMinor+:amount WHERE id=:id AND savedMinor+:amount<=targetMinor") suspend fun contributeGoal(id:Long,amount:Long):Int
+ @Query("UPDATE goals SET name=:name,targetMinor=:target,savedMinor=:saved,currency=:currency,exchangeRate=:rate,deadlineEpochDay=:deadline WHERE id=:id AND status='ACTIVE'") suspend fun updateGoal(id:Long,name:String,target:Long,saved:Long,currency:String,rate:Double,deadline:Long):Int
+ @Query("UPDATE goals SET savedMinor=savedMinor+:amount,status=CASE WHEN savedMinor+:amount>=targetMinor THEN 'COMPLETED' ELSE status END WHERE id=:id AND status='ACTIVE' AND savedMinor+:amount<=targetMinor") suspend fun contributeGoal(id:Long,amount:Long):Int
+ @Query("UPDATE goals SET status=:status WHERE id=:id AND status='ACTIVE'") suspend fun setGoalStatus(id:Long,status:String):Int
  @Query("DELETE FROM goals WHERE id=:id") suspend fun deleteGoal(id:Long)
 }
 
-@Database(entities=[Profile::class,IncomePeriod::class,FixedExpense::class,CreditCard::class,Expense::class,CardPayment::class,SavingsGoal::class],version=2,exportSchema=true)
+@Database(entities=[Profile::class,IncomePeriod::class,FixedExpense::class,CreditCard::class,Expense::class,CardPayment::class,SavingsGoal::class],version=3,exportSchema=true)
 abstract class FinanceDatabase:RoomDatabase(){
  abstract fun dao():FinanceDao
  companion object {
@@ -91,6 +93,7 @@ abstract class FinanceDatabase:RoomDatabase(){
     }
    }
   }
-  fun create(context:Context)=Room.databaseBuilder(context,FinanceDatabase::class.java,"control-financiero-personal.db").addMigrations(MIGRATION_1_2).build()
+  val MIGRATION_2_3:Migration=object:Migration(2,3){override fun migrate(database:SupportSQLiteDatabase){database.execSQL("ALTER TABLE `goals` ADD COLUMN `status` TEXT NOT NULL DEFAULT 'ACTIVE'");database.execSQL("UPDATE `goals` SET `status`='COMPLETED' WHERE `savedMinor`>=`targetMinor'")}}
+  fun create(context:Context)=Room.databaseBuilder(context,FinanceDatabase::class.java,"control-financiero-personal.db").addMigrations(MIGRATION_1_2,MIGRATION_2_3).build()
  }
 }

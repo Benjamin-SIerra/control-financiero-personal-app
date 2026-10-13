@@ -14,8 +14,8 @@ Proyecto Android nativo **independiente**, creado desde cero. No reemplaza ni mo
 - Resumen de ingreso, apartado, ahorro sugerido, gastos del periodo y saldo libre.
 - Gastos rápidos con comandos de texto: `Gasto $120 tacos` y `Tarjeta $500 comida`.
 - Tarjetas representadas por alias, límite, saldo utilizado, días de corte/pago y abonos. Se pregunta si el pago mensual estimado se separa del sueldo o de otro presupuesto.
-- Metas con moneda, fecha objetivo y sugerencia de aporte por periodo.
-- Tipo de cambio manual para convertir montos a la moneda base (no se consulta la red).
+- Metas de ahorro con crear, editar, aportar, cancelar, completar y eliminar con confirmación. Las metas activas apartan una estimación por pago; al cancelar/completar/eliminar o alcanzar el objetivo se libera ese apartado y se recalcula el saldo libre.
+- Gastos y metas multidivisa: la persona captura la tasa de cambio estimada 1 unidad extranjera = X unidades de moneda base. La tasa queda guardada con el movimiento/meta y se usa en el saldo; no se descarga cotización en vivo.
 - Alertas preventivas por saldo libre bajo/agotado y utilización de crédito alta.
 
 ### Ingresos / Periodos
@@ -24,7 +24,7 @@ Cada ingreso se guarda como un registro con fechas inclusivas de inicio y fin, f
 
 ## Cálculo
 
-Los montos se guardan como unidades menores enteras (centavos). Para convertir gastos a moneda base se guarda el tipo de cambio que ingresó el usuario. El apartado de cada gasto se calcula como `monto × cobros/año ÷ pagos de sueldo/año` (semanal 52, catorcenal 26, quincenal 24 y mensual 12). Las metas distribuyen el restante entre los pagos estimados hasta la fecha límite. El saldo libre es ingreso del periodo menos apartados, metas y gastos registrados dentro del periodo de sueldo.
+Los montos se guardan como unidades menores enteras (centavos). Para convertir gastos, tarjetas, recurrentes y metas a moneda base se guarda la tasa manual indicada por el usuario (1 unidad de divisa = X unidades base); las tasas no se descargan ni actualizan automáticamente. El apartado de cada gasto se calcula como `monto × cobros/año ÷ pagos de sueldo/año` (semanal 52, catorcenal 26, quincenal 24 y mensual 12). Solo las metas activas distribuyen su restante convertido entre los pagos estimados hasta la fecha límite. El saldo libre es ingreso del periodo menos apartados activos y gastos convertidos registrados dentro del periodo de sueldo. Room migra v1→v2 preservando el periodo de ingreso y v2→v3 agregando estado a las metas sin borrar datos.
 
 La captura rápida es texto; la primera tarjeta guardada se asigna cuando el comando comienza con `Tarjeta`. El acceso a voz/micrófono no se solicita para minimizar permisos y no transmitir audio.
 

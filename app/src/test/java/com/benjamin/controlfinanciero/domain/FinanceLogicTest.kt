@@ -14,7 +14,27 @@ class FinanceLogicTest{
  @Test fun salaryFundedCardPaymentIsReservedPerPaycheck(){val c=CreditCard(name="Visa",limitMinor=1_000_000,cutDay=10,dueDay=20,salaryFunded=true,expectedPaymentMinor=300_000);val r=calculateBudget(1_000_000,"QUINCENAL",emptyList(),listOf(c),emptyList(),emptyList());assertEquals(150_000,r.reserve)}
  @Test fun manualFxIsAppliedToBudget(){val bill=FixedExpense(title="Cloud",amountMinor=10_000,currency="USD",exchangeRate=20.0,frequency="MENSUAL",dueLabel="día 5");assertEquals(100_000,calculateBudget(500_000,"QUINCENAL",listOf(bill),emptyList(),emptyList(),emptyList()).reserve)}
  @Test fun goalSavingsAreSpreadAcrossRemainingPayPeriods(){val goal=SavingsGoal(name="Viaje",targetMinor=100_000,currency="MXN",deadlineEpochDay=LocalDate.now().plusDays(90).toEpochDay());assertEquals(16_667,calculateBudget(1_000_000,"QUINCENAL",emptyList(),emptyList(),listOf(goal),emptyList()).goalReserve)}
- @Test fun weeklyFixedExpenseKeepsItsPerOccurrenceAmountSeparateFromMonthlyTotal(){val bill=FixedExpense(title="Payjoy",amountMinor=100_000,currency="MXN",exchangeRate=1.0,frequency="SEMANAL",dueLabel="viernes");assertEquals(100_000,fixedExpenseAmountPerOccurrence(bill));assertEquals(433_333,fixedExpenseMonthlyEquivalent(bill))}
+ @Test fun completedOrCancelledGoalDoesNotReserveAndReleasesFreeBalance(){
+  val deadline=LocalDate.now().plusDays(90).toEpochDay()
+  val active=SavingsGoal(name="Viaje",targetMinor=100_000,currency="MXN",deadlineEpochDay=deadline)
+  val activeBudget=calculateBudget(1_000_000,"QUINCENAL",emptyList(),emptyList(),listOf(active),emptyList())
+  val completedBudget=calculateBudget(1_000_000,"QUINCENAL",emptyList(),emptyList(),listOf(active.copy(status="COMPLETED")),emptyList())
+  val cancelledBudget=calculateBudget(1_000_000,"QUINCENAL",emptyList(),emptyList(),listOf(active.copy(status="CANCELLED")),emptyList())
+  assertEquals(16_667,activeBudget.goalReserve)
+  assertEquals(983_333,activeBudget.free)
+  assertEquals(0,completedBudget.goalReserve);assertEquals(1_000_000,completedBudget.free)
+  assertEquals(0,cancelledBudget.goalReserve);assertEquals(1_000_000,cancelledBudget.free)
+ }
+ @Test fun goalFxRateConvertsTargetIntoBaseCurrencyForReserve(){
+  val goal=SavingsGoal(name="Laptop",targetMinor=100_000,currency="USD",exchangeRate=20.0,deadlineEpochDay=LocalDate.now().plusDays(90).toEpochDay())
+  assertEquals(333_334,calculateBudget(1_000_000,"QUINCENAL",emptyList(),emptyList(),listOf(goal),emptyList()).goalReserve)
+ }
+ @Test fun manualRateConvertsForeignExpenseIntoBaseMinorUnits(){assertEquals(218_750,toBaseMinor(12_500,17.5))}
+ @Test fun completedGoalIsNotReservedAfterDeadlineCalculation(){
+  val goal=SavingsGoal(name="Fondo",targetMinor=50_000,currency="MXN",deadlineEpochDay=LocalDate.now().plusDays(10).toEpochDay(),status="COMPLETED")
+  assertEquals(0,calculateBudget(500_000,"QUINCENAL",emptyList(),emptyList(),listOf(goal),emptyList()).goalReserve)
+ }
+
  @Test fun monthlyBudgetUsesWeeklyExpenseMonthlyEquivalent(){val bill=FixedExpense(title="Payjoy",amountMinor=100_000,currency="MXN",exchangeRate=1.0,frequency="SEMANAL",dueLabel="viernes");assertEquals(433_333,calculateBudget(2_000_000,"MENSUAL",listOf(bill),emptyList(),emptyList(),emptyList()).reserve)}
  @Test fun pickerMillisFormatsAsIsoCalendarDate(){val millis=LocalDate.of(2027,2,5).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli();assertEquals("2027-02-05",selectedDateMillisToIsoDate(millis))}
 }

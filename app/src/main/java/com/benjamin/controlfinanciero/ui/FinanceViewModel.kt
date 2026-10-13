@@ -32,12 +32,15 @@ class FinanceViewModel(private val repo:FinanceRepository):ViewModel(){
   "Periodo de ingreso guardado"
  }
  fun deleteIncomePeriod(id:Long)=op{repo.deleteIncomePeriod(id);"Periodo de ingreso eliminado"}
- fun addFixed(name:String,amount:String,currency:String,rate:String,freq:String,due:String)=op{repo.addFixed(name,moneyToMinor(amount),currency,rate.toDoubleOrNull()?:1.0,freq,due);"Gasto recurrente agregado"}
+ fun addFixed(name:String,amount:String,currency:String,rate:String,freq:String,due:String)=op{repo.addFixed(name,moneyToMinor(amount),currency,rate.toDoubleOrNull()?:throw IllegalArgumentException("Escribe el tipo de cambio"),freq,due);"Gasto recurrente agregado"}
  fun deleteFixed(id:Long)=op{repo.deleteFixed(id);"Gasto fijo eliminado"}
- fun addCard(name:String,limit:String,cut:String,due:String,salary:Boolean,payment:String,currency:String,rate:String)=op{repo.addCard(name,moneyToMinor(limit),cut.toInt(),due.toInt(),salary,if(payment.isBlank())0 else moneyToMinor(payment),currency,rate.toDoubleOrNull()?:1.0);"Tarjeta agregada"}
- fun spend(text:String,currency:String,rate:String,cardId:Long?,category:String)=op{val parsed=parseQuickExpense(text);val resolved=if(category=="Otros")categoryFor(parsed.concept)else category;repo.spend(parsed.concept,resolved,parsed.amountMinor,currency,rate.toDoubleOrNull()?:1.0,if(parsed.isCard)cardId else null);"Gasto guardado: ${parsed.concept}"}
+ fun addCard(name:String,limit:String,cut:String,due:String,salary:Boolean,payment:String,currency:String,rate:String)=op{repo.addCard(name,moneyToMinor(limit),cut.toInt(),due.toInt(),salary,if(payment.isBlank())0 else moneyToMinor(payment),currency,rate.toDoubleOrNull()?:throw IllegalArgumentException("Escribe el tipo de cambio"));"Tarjeta agregada"}
+ fun spend(text:String,currency:String,rate:String,cardId:Long?,category:String)=op{val parsed=parseQuickExpense(text);val resolved=if(category=="Otros")categoryFor(parsed.concept)else category;repo.spend(parsed.concept,resolved,parsed.amountMinor,currency,rate.toDoubleOrNull()?:throw IllegalArgumentException("Escribe el tipo de cambio"),if(parsed.isCard)cardId else null);"Gasto guardado: ${parsed.concept}"}
  fun payCard(id:Long,amount:String)=op{repo.payCard(id,moneyToMinor(amount));"Abono registrado"}
- fun addGoal(name:String,target:String,currency:String,rate:String,deadline:String)=op{val d=LocalDate.parse(deadline).toEpochDay();repo.addGoal(name,moneyToMinor(target),currency,rate.toDoubleOrNull()?:1.0,d);"Meta creada"}
+ fun addGoal(name:String,target:String,currency:String,rate:String,deadline:String)=op{val d=LocalDate.parse(deadline).toEpochDay();repo.addGoal(name,moneyToMinor(target),currency,rate.toDoubleOrNull()?:throw IllegalArgumentException("Escribe el tipo de cambio"),d);"Meta creada"}
+ fun updateGoal(id:Long,name:String,target:String,currency:String,rate:String,deadline:String)=op{val d=LocalDate.parse(deadline).toEpochDay();repo.updateGoal(id,name,moneyToMinor(target),currency,rate.toDoubleOrNull()?:throw IllegalArgumentException("Escribe el tipo de cambio"),d);"Meta actualizada"}
+ fun setGoalStatus(id:Long,status:String)=op{repo.setGoalStatus(id,status);if(status=="COMPLETED")"Meta completada; apartado liberado" else "Meta cancelada; apartado liberado"}
+ fun deleteGoal(id:Long)=op{repo.deleteGoal(id);"Meta eliminada; apartado liberado"}
  fun contribute(id:Long,amount:String)=op{repo.contribute(id,moneyToMinor(amount));"Aporte registrado"}
  private fun op(block:suspend()->String){viewModelScope.launch{runCatching{block()}.onSuccess{_notice.emit(it)}.onFailure{_notice.emit(it.message?:"Revisa los datos")}}}
  companion object{fun factory(repo:FinanceRepository)=object:ViewModelProvider.Factory{@Suppress("UNCHECKED_CAST") override fun <T:ViewModel> create(modelClass:Class<T>):T=FinanceViewModel(repo) as T}}

@@ -39,7 +39,7 @@ fun calculateBudget(incomeMinor:Long,payFrequency:String,fixed:List<FixedExpense
  val pays=payPeriodsPerYear(payFrequency)
  val fixedReserve=fixed.filter{it.enabled}.sumOf{fixedExpenseReservePerIncomePay(it,payFrequency)}
  val cardReserve=cards.filter{it.salaryFunded}.sumOf{(toBaseMinor(it.expectedPaymentMinor,it.exchangeRate)*12.0/pays).roundToLong()}
- val goalReserve=goals.sumOf { g->
+ val goalReserve=goals.filter{it.status=="ACTIVE"}.sumOf { g->
    val remaining=toBaseMinor((g.targetMinor-g.savedMinor).coerceAtLeast(0),g.exchangeRate)
    val days=java.time.temporal.ChronoUnit.DAYS.between(today,LocalDate.ofEpochDay(g.deadlineEpochDay))
    val periods=ceil((days.coerceAtLeast(1)*pays)/365.2425).toLong().coerceAtLeast(1)
