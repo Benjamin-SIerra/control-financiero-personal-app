@@ -19,46 +19,72 @@ import java.text.NumberFormat
 import java.util.Currency
 import java.util.Locale
 import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
 val Gold=Color(0xFFC8A84C);val Green=Color(0xFF55A57A);val Red=Color(0xFFD26F6F);val Amber=Color(0xFFD1A452);val Muted=Color(0xFF9A9A95)
 private val freqs=listOf("SEMANAL","CATORCENAL","QUINCENAL","MENSUAL")
 private fun fmt(minor:Long,currency:String):String=runCatching{NumberFormat.getCurrencyInstance(Locale("es","MX")).apply{this.currency=Currency.getInstance(currency);minimumFractionDigits=2;maximumFractionDigits=2}.format(minor/100.0)}.getOrDefault("$${"%.2f".format(minor/100.0)} $currency")
+private fun dateLabel(epochDay:Long)=LocalDate.ofEpochDay(epochDay).format(DateTimeFormatter.ofPattern("dd/MM/yyyy"))
 
 @Composable fun FinanceApp(vm:FinanceViewModel){
- val profile by vm.profile.collectAsState();val fixed by vm.fixed.collectAsState();val cards by vm.cards.collectAsState();val goals by vm.goals.collectAsState();val expenses by vm.expenses.collectAsState()
- var tab by remember{mutableIntStateOf(0)};var form by remember{mutableStateOf("")};var targetId by remember{mutableLongStateOf(0)};var notice by remember{mutableStateOf("")}
+ val profile by vm.profile.collectAsState();val periods by vm.incomePeriods.collectAsState();val activePeriod by vm.activeIncomePeriod.collectAsState();val today by vm.todayEpochDay.collectAsState();val fixed by vm.fixed.collectAsState();val cards by vm.cards.collectAsState();val goals by vm.goals.collectAsState();val expenses by vm.expenses.collectAsState()
+ var tab by remember{mutableIntStateOf(0)};var incomeScreen by remember{mutableStateOf(false)};var form by remember{mutableStateOf("")};var targetId by remember{mutableLongStateOf(0)};var notice by remember{mutableStateOf("")};var editingPeriod by remember{mutableStateOf<IncomePeriod?>(null)};var pendingDelete by remember{mutableStateOf<IncomePeriod?>(null)};var defaultIncomeStart by remember{mutableLongStateOf(0)}
  LaunchedEffect(Unit){vm.notice.collect{notice=it}}
- val budget=remember(profile,fixed,cards,goals,expenses){calculateBudget(profile?.incomeMinor?:0,profile?.payFrequency?:"QUINCENAL",fixed,cards,goals,expenses)}
- Scaffold(containerColor=Color(0xFF0A0B0D),bottomBar={NavigationBar(containerColor=Color(0xFF101214)){listOf("Inicio","Gastos","Fijos","Tarjetas","Metas").forEachIndexed{index,label->NavigationBarItem(selected=tab==index,onClick={tab=index},icon={Text(listOf("⌂","−","↻","▣","◎")[index],fontSize=17.sp)},label={Text(label,fontSize=10.sp)},colors=NavigationBarItemDefaults.colors(selectedIconColor=Gold,selectedTextColor=Gold,indicatorColor=Color(0xFF24221A),unselectedIconColor=Muted,unselectedTextColor=Muted))}}}){padding->
+ val budget=remember(activePeriod,profile,fixed,cards,goals,expenses){calculateBudget(activePeriod?.incomeMinor?:0,activePeriod?.frequency?:profile?.payFrequency?:"QUINCENAL",fixed,cards,goals,expenses)}
+ Scaffold(containerColor=Color(0xFF0A0B0D),bottomBar={NavigationBar(containerColor=Color(0xFF101214)){listOf("Inicio","Gastos","Fijos","Tarjetas","Metas").forEachIndexed{index,label->NavigationBarItem(selected=tab==index,onClick={tab=index;incomeScreen=false},icon={Text(listOf("⌂","−","↻","▣","◎")[index],fontSize=17.sp)},label={Text(label,fontSize=10.sp)},colors=NavigationBarItemDefaults.colors(selectedIconColor=Gold,selectedTextColor=Gold,indicatorColor=Color(0xFF24221A),unselectedIconColor=Muted,unselectedTextColor=Muted))}}}){padding->
   Column(Modifier.fillMaxSize().padding(padding)) {
-   Row(Modifier.fillMaxWidth().padding(horizontal=20.dp,vertical=14.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween){Column{Text("CONTROL FINANCIERO",color=Gold,fontSize=11.sp,fontWeight=FontWeight.Bold,letterSpacing=1.2.sp);Text(listOf("Resumen","Gastos del periodo","Gastos recurrentes","Tarjetas","Metas")[tab],fontSize=22.sp,fontWeight=FontWeight.SemiBold)};TextButton(onClick={form="income"}){Text("${profile?.currency?:"MXN"}  ✎",color=Gold)}}
-   when(tab){0->HomeScreen(profile,budget,fixed,cards,goals,onEditIncome={form="income"},onNavigate={tab=it},onExpense={form="expense"});1->ExpensesScreen(profile,expenses,onAdd={form="expense"});2->FixedScreen(profile,fixed,onAdd={form="fixed"},onDelete=vm::deleteFixed);3->CardsScreen(cards,onAdd={form="card"},onPay={targetId=it;form="pay"});else->GoalsScreen(goals,onAdd={form="goal"},onContribute={targetId=it;form="contribute"})}
+   Row(Modifier.fillMaxWidth().padding(horizontal=20.dp,vertical=14.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween){Column{Text("CONTROL FINANCIERO",color=Gold,fontSize=11.sp,fontWeight=FontWeight.Bold,letterSpacing=1.2.sp);Text(if(incomeScreen)"Ingresos / Periodos" else listOf("Resumen","Gastos del periodo","Gastos recurrentes","Tarjetas","Metas")[tab],fontSize=22.sp,fontWeight=FontWeight.SemiBold)};TextButton(onClick={if(incomeScreen)incomeScreen=false else incomeScreen=true}){Text(if(incomeScreen)"Volver" else "Ingresos",color=Gold)}}
+   if(incomeScreen)IncomePeriodsScreen(periods,today,onAdd={defaultIncomeStart=periods.maxOfOrNull{it.endEpochDay}?.plus(1)?:today;editingPeriod=null;form="income_period"},onEdit={editingPeriod=it;form="income_period"},onDelete={pendingDelete=it}) else when(tab){0->HomeScreen(profile,activePeriod,budget,fixed,cards,goals,onEditIncome={editingPeriod=activePeriod;form="income_period"},onNavigate={tab=it},onExpense={form="expense"});1->ExpensesScreen(profile,expenses,onAdd={form="expense"});2->FixedScreen(profile,fixed,onAdd={form="fixed"},onDelete=vm::deleteFixed);3->CardsScreen(cards,onAdd={form="card"},onPay={targetId=it;form="pay"});else->GoalsScreen(goals,onAdd={form="goal"},onContribute={targetId=it;form="contribute"})}
   }
  }
- if(form.isNotBlank())FinanceDialog(form,profile?.currency?:"MXN",onClose={form=""}){v->when(form){
-  "income"->vm.saveIncome(v["amount"].orEmpty(),v["currency"].orEmpty(),v["frequency"].orEmpty())
+ if(form.isNotBlank())FinanceDialog(form,profile?.currency?:"MXN",onClose={form="";editingPeriod=null},onSave={v->when(form){
+  "income_period"->vm.saveIncomePeriod(v["id"].orEmpty(),v["start"].orEmpty(),v["end"].orEmpty(),v["amount"].orEmpty(),v["currency"].orEmpty(),v["frequency"].orEmpty())
   "fixed"->vm.addFixed(v["name"].orEmpty(),v["amount"].orEmpty(),v["currency"].orEmpty(),v["rate"].orEmpty(),v["frequency"].orEmpty(),v["due"].orEmpty())
   "expense"->vm.spend(v["quick"].orEmpty(),v["currency"].orEmpty(),v["rate"].orEmpty(),cards.firstOrNull()?.id,v["category"].orEmpty())
   "card"->vm.addCard(v["name"].orEmpty(),v["limit"].orEmpty(),v["cut"].orEmpty(),v["due"].orEmpty(),v["salary"]=="true",v["payment"].orEmpty(),v["currency"].orEmpty(),v["rate"].orEmpty())
   "pay"->vm.payCard(targetId,v["amount"].orEmpty())
   "goal"->vm.addGoal(v["name"].orEmpty(),v["amount"].orEmpty(),v["currency"].orEmpty(),v["rate"].orEmpty(),v["deadline"].orEmpty())
   "contribute"->vm.contribute(targetId,v["amount"].orEmpty())
- };form=""}
+ };form="";editingPeriod=null},incomePeriod=editingPeriod,defaultStartEpochDay=defaultIncomeStart.takeIf{it>0},defaultFrequency=profile?.payFrequency?:"QUINCENAL")
+ if(pendingDelete!=null)AlertDialog(onDismissRequest={pendingDelete=null},title={Text("Eliminar periodo")},text={Text("Se eliminará el ingreso de ${dateLabel(pendingDelete!!.startEpochDay)} a ${dateLabel(pendingDelete!!.endEpochDay)}. Esta acción no se puede deshacer.")},confirmButton={TextButton(onClick={pendingDelete?.let{vm.deleteIncomePeriod(it.id)};pendingDelete=null}){Text("Eliminar",color=Red)}},dismissButton={TextButton(onClick={pendingDelete=null}){Text("Cancelar",color=Muted)}})
  if(notice.isNotBlank())AlertDialog(onDismissRequest={notice=""},confirmButton={TextButton(onClick={notice=""}){Text("Entendido",color=Gold)}},text={Text(notice)})
 }
 
-@Composable private fun HomeScreen(p:Profile?,b:BudgetResult,fixed:List<FixedExpense>,cards:List<CreditCard>,goals:List<SavingsGoal>,onEditIncome:()->Unit,onNavigate:(Int)->Unit,onExpense:()->Unit){
+@Composable private fun HomeScreen(p:Profile?,period:IncomePeriod?,b:BudgetResult,fixed:List<FixedExpense>,cards:List<CreditCard>,goals:List<SavingsGoal>,onEditIncome:()->Unit,onNavigate:(Int)->Unit,onExpense:()->Unit){
+ val currency=period?.currency?:p?.currency?:"MXN"
  LazyColumn(contentPadding=PaddingValues(horizontal=18.dp,vertical=8.dp),verticalArrangement=Arrangement.spacedBy(14.dp)){
-  item{Surface(shape=RoundedCornerShape(22.dp),color=Color(0xFF171816),modifier=Modifier.fillMaxWidth().clickable(onClick=onEditIncome)){Column(Modifier.padding(20.dp)){Text("SALDO LIBRE DE ESTE PERIODO",color=Muted,fontSize=11.sp,fontWeight=FontWeight.Bold);Spacer(Modifier.height(8.dp));Text(fmt(b.free,p?.currency?:"MXN"),color=if(b.free<0)Red else Gold,fontSize=34.sp,fontWeight=FontWeight.Bold);Text(if(p==null)"Configura tu ingreso para empezar" else "Ingreso ${freqLabel(p.payFrequency)} · ${p.currency}",color=Muted,fontSize=13.sp)}}}
-  item{Row(horizontalArrangement=Arrangement.spacedBy(10.dp)){Metric("Ingreso",fmt(b.income,p?.currency?:"MXN"),Modifier.weight(1f));Metric("Apartar",fmt(b.reserve,p?.currency?:"MXN"),Modifier.weight(1f))}}
+  item{Surface(shape=RoundedCornerShape(22.dp),color=Color(0xFF171816),modifier=Modifier.fillMaxWidth().clickable(onClick=onEditIncome)){Column(Modifier.padding(20.dp)){Text("SALDO LIBRE DE ESTE PERIODO",color=Muted,fontSize=11.sp,fontWeight=FontWeight.Bold);Spacer(Modifier.height(8.dp));Text(fmt(b.free,currency),color=if(b.free<0)Red else Gold,fontSize=34.sp,fontWeight=FontWeight.Bold);Text(if(period==null)"Preparando periodo de ingreso" else "${freqLabel(period.frequency)} · ${dateLabel(period.startEpochDay)}–${dateLabel(period.endEpochDay)}",color=Muted,fontSize=13.sp);if(period?.incomeMinor==0L)Text("Ingreso pendiente de registrar",color=Amber,fontSize=12.sp)}}}
+  item{Row(horizontalArrangement=Arrangement.spacedBy(10.dp)){Metric("Ingreso",if(period?.incomeMinor==0L)"Por registrar" else fmt(b.income,currency),Modifier.weight(1f));Metric("Apartar",fmt(b.reserve,currency),Modifier.weight(1f))}}
   item{Row(horizontalArrangement=Arrangement.spacedBy(10.dp)){Metric("Ahorro sugerido",fmt(b.goalReserve,p?.currency?:"MXN"),Modifier.weight(1f));Metric("Gastado",fmt(b.spent,p?.currency?:"MXN"),Modifier.weight(1f))}}
-  item{if(b.free<=0&&p!=null)AlertCard("⚠️ Saldo libre agotado o negativo. Revisa gastos y apartados.",Red)else if(p!=null&&b.free<=b.income/5)AlertCard("⚠️ Tu saldo libre está por debajo del 20% del ingreso del periodo.",Amber)}
+  item{if(b.free<=0&&period?.incomeMinor!=0L)AlertCard("⚠️ Saldo libre agotado o negativo. Revisa gastos y apartados.",Red)else if(period!=null&&period.incomeMinor>0&&b.free<=b.income/5)AlertCard("⚠️ Tu saldo libre está por debajo del 20% del ingreso del periodo.",Amber)}
   item{Button(onClick=onExpense,modifier=Modifier.fillMaxWidth().height(54.dp),colors=ButtonDefaults.buttonColors(containerColor=Gold,contentColor=Color.Black),shape=RoundedCornerShape(16.dp)){Text("＋  Registrar gasto",fontSize=16.sp,fontWeight=FontWeight.Bold)}}
   item{Text("RESUMEN",color=Gold,fontSize=11.sp,fontWeight=FontWeight.Bold,letterSpacing=1.sp)}
   item{Row(horizontalArrangement=Arrangement.spacedBy(10.dp)){Metric("Gastos fijos",fixed.count{it.enabled}.toString(),Modifier.weight(1f));Metric("Tarjetas",cards.size.toString(),Modifier.weight(1f));Metric("Metas",goals.count{it.savedMinor<it.targetMinor}.toString(),Modifier.weight(1f))}}
   item{Text("El apartado se estima usando las periodicidades configuradas. Puedes editarlo cuando cambien tus fechas o montos.",color=Muted,fontSize=12.sp)}
  }
 }
+@Composable private fun IncomePeriodsScreen(periods:List<IncomePeriod>,todayEpochDay:Long,onAdd:()->Unit,onEdit:(IncomePeriod)->Unit,onDelete:(IncomePeriod)->Unit){
+ Column(Modifier.fillMaxSize().padding(horizontal=18.dp)){
+  Text("Cada periodo conserva su ingreso real. Al terminar su rango pasa a histórico y se abre otro periodo sin copiar el monto anterior.",color=Muted,fontSize=12.sp)
+  Spacer(Modifier.height(10.dp));Button(onClick=onAdd,modifier=Modifier.fillMaxWidth().height(50.dp),colors=ButtonDefaults.buttonColors(containerColor=Gold,contentColor=Color.Black),shape=RoundedCornerShape(14.dp)){Text("＋  Nuevo periodo de ingreso")}
+  LazyColumn(verticalArrangement=Arrangement.spacedBy(9.dp),contentPadding=PaddingValues(vertical=14.dp)){
+   items(periods,key={it.id}){period->
+    val status=incomePeriodStatus(period.startEpochDay,period.endEpochDay,todayEpochDay)
+    val (label,color)=when(status){IncomePeriodStatus.ACTIVE->"ACTUAL" to Green;IncomePeriodStatus.HISTORICAL->"HISTÓRICO" to Muted;IncomePeriodStatus.UPCOMING->"PROGRAMADO" to Amber}
+    Surface(shape=RoundedCornerShape(16.dp),color=Color(0xFF15171A)){
+     Column(Modifier.fillMaxWidth().padding(15.dp)){
+      Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically){Text("${dateLabel(period.startEpochDay)} – ${dateLabel(period.endEpochDay)}",color=Color.White,fontWeight=FontWeight.SemiBold);Text(label,color=color,fontSize=10.sp,fontWeight=FontWeight.Bold)}
+      Spacer(Modifier.height(5.dp));Text("${freqLabel(period.frequency)} · ${period.currency}",color=Muted,fontSize=12.sp)
+      Text(if(period.incomeMinor==0L)"Ingreso pendiente de registrar" else "Ingreso real: ${fmt(period.incomeMinor,period.currency)}",color=if(period.incomeMinor==0L)Amber else Gold,fontSize=14.sp,fontWeight=FontWeight.Medium,modifier=Modifier.padding(top=5.dp))
+      Row(horizontalArrangement=Arrangement.End,modifier=Modifier.fillMaxWidth()){TextButton(onClick={onEdit(period)}){Text("Editar",color=Gold)};TextButton(onClick={onDelete(period)}){Text("Eliminar",color=Red)}}
+     }
+    }
+   }
+   if(periods.isEmpty())item{Text("Aún no hay periodos de ingreso.",color=Muted,modifier=Modifier.padding(top=18.dp))}
+  }
+ }
+}
+
 @Composable private fun Metric(title:String,value:String,modifier:Modifier=Modifier){Surface(modifier=modifier,shape=RoundedCornerShape(16.dp),color=Color(0xFF15171A)){Column(Modifier.padding(14.dp)){Text(title,color=Muted,fontSize=11.sp);Spacer(Modifier.height(4.dp));Text(value,color=Color.White,fontSize=16.sp,fontWeight=FontWeight.SemiBold)}}}
 @Composable private fun AlertCard(text:String,color:Color){Surface(shape=RoundedCornerShape(14.dp),color=color.copy(alpha=.15f),modifier=Modifier.fillMaxWidth()){Text(text,Modifier.padding(14.dp),color=color,fontSize=13.sp)}}
 

@@ -10,11 +10,60 @@ import kotlinx.coroutines.flow.first
 class FinanceRepository(private val db:FinanceDatabase){
  private val dao=db.dao()
  val profile:Flow<Profile?> = dao.profile()
+ val incomePeriods:Flow<List<IncomePeriod>> = dao.incomePeriods()
  val fixed:Flow<List<FixedExpense>> = dao.fixed()
  val cards:Flow<List<CreditCard>> = dao.cards()
  val goals:Flow<List<SavingsGoal>> = dao.goals()
- fun expenses(p:Profile?):Flow<List<Expense>>{val range=periodRange(p);return dao.expenses(range.first,range.second)}
- suspend fun saveIncome(amount:Long,currency:String,frequency:String){require(amount>0);require(currency.length==3);require(frequency in setOf("SEMANAL","CATORCENAL","QUINCENAL","MENSUAL"));val old=profile.first();dao.saveProfile(Profile(incomeMinor=amount,currency=currency.uppercase(),payFrequency=frequency,anchorEpochDay=old?.anchorEpochDay?.takeIf{it>0}?:LocalDate.now().toEpochDay()))}
+
+ fun expenses(period:IncomePeriod?,p:Profile?):Flow<List<Expense>>{
+  val zone=ZoneId.systemDefault()
+  val range=if(period!=null){
+   period.startEpochDay to period.endEpochDay
+  }else{
+   val millis=periodRange(p)
+   val start=LocalDate.ofInstant(java.time.Instant.ofEpochMilli(millis.first),zone).toEpochDay()
+   val end=LocalDate.ofInstant(java.time.Instant.ofEpochMilli(millis.second-1),zone).toEpochDay()
+   start to end
+  }
+  val from=LocalDate.ofEpochDay(range.first).atStartOfDay(zone).toInstant().toEpochMilli()
+  val to=LocalDate.ofEpochDay(range.second).plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+  return dao.expenses(from,to)
+ }
+
+ suspend fun saveIncomePeriod(id:Long,startEpochDay:Long,endEpochDay:Long,amount:Long,currency:String,frequency:String){
+  require(startEpochDay<=endEpochDay){"La fecha de inicio debe ser anterior o igual a la fecha de fin"}
+  require(amount>=0){"El ingreso no puede ser negativo"}
+  require(currency.length==3){"Usa un código de moneda de 3 letras"}
+  require(frequency in setOf("SEMANAL","CATORCENAL","QUINCENAL","MENSUAL")){"Frecuencia de pago inválida"}
+  db.withTransaction{
+   val all=dao.incomePeriodsOnce()
+   require(all.none{it.id!=id&&incomePeriodsOverlap(startEpochDay,endEpochDay,it.startEpochDay,it.endEpochDay)}){"El rango se traslapa con otro periodo guardado"}
+   val normalizedCurrency=currency.uppercase()
+   val old=dao.profileOnce()
+   require(old==null||normalizedCurrency==old.currency){"Los periodos deben usar la moneda base configurada (${old?.currency})"}
+   dao.saveIncomePeriod(IncomePeriod(id=id,startEpochDay=startEpochDay,endEpochDay=endEpochDay,incomeMinor=amount,currency=normalizedCurrency,frequency=frequency))
+   val today=LocalDate.now().toEpochDay()
+   if(old==null||today in startEpochDay..endEpochDay)dao.saveProfile(Profile(incomeMinor=amount,currency=normalizedCurrency,payFrequency=frequency,anchorEpochDay=startEpochDay).copy(id=old?.id?:1))
+  }
+ }
+
+ suspend fun ensureCurrentIncomePeriod(today:LocalDate=LocalDate.now()){
+  val todayEpoch=today.toEpochDay()
+  db.withTransaction{
+   val periods=dao.incomePeriodsOnce()
+   if(periods.any{it.startEpochDay<=todayEpoch&&it.endEpochDay>=todayEpoch})return@withTransaction
+   if(periods.any{it.startEpochDay>todayEpoch})return@withTransaction
+   val previous=periods.filter{it.endEpochDay<todayEpoch}.maxByOrNull{it.endEpochDay}
+   val profile=dao.profileOnce()
+   val frequency=previous?.frequency?:profile?.payFrequency?:"QUINCENAL"
+   val currency=previous?.currency?:profile?.currency?:"MXN"
+   val start=nextIncomePeriodStart(todayEpoch,previous?.endEpochDay)
+   dao.saveIncomePeriod(IncomePeriod(startEpochDay=start,endEpochDay=defaultIncomePeriodEnd(start,frequency),incomeMinor=0,currency=currency,frequency=frequency))
+  }
+ }
+
+ suspend fun deleteIncomePeriod(id:Long)=db.withTransaction{dao.deleteIncomePeriod(id)}
+
  suspend fun addFixed(name:String,amount:Long,currency:String,rate:Double,frequency:String,due:String){require(name.isNotBlank()&&amount>0&&rate>0);require(currency.length==3);require(frequency in setOf("SEMANAL","CATORCENAL","QUINCENAL","MENSUAL"));dao.addFixed(FixedExpense(title=name.trim(),amountMinor=amount,currency=currency.uppercase(),exchangeRate=rate,frequency=frequency,dueLabel=due.trim()))}
  suspend fun deleteFixed(id:Long)=dao.deleteFixed(id)
  suspend fun addCard(name:String,limit:Long,cut:Int,due:Int,salary:Boolean,payment:Long,currency:String,rate:Double){require(name.isNotBlank()&&limit>0&&cut in 1..31&&due in 1..31&&payment>=0&&rate>0&&currency.length==3);dao.addCard(CreditCard(name=name.trim(),limitMinor=limit,cutDay=cut,dueDay=due,salaryFunded=salary,expectedPaymentMinor=payment,currency=currency.uppercase(),exchangeRate=rate))}
@@ -23,4 +72,5 @@ class FinanceRepository(private val db:FinanceDatabase){
  suspend fun addGoal(name:String,target:Long,currency:String,rate:Double,deadline:Long){require(name.isNotBlank()&&target>0&&rate>0&&deadline>=LocalDate.now().toEpochDay()&&currency.length==3);dao.addGoal(SavingsGoal(name=name.trim(),targetMinor=target,currency=currency.uppercase(),exchangeRate=rate,deadlineEpochDay=deadline))}
  suspend fun contribute(id:Long,amount:Long){require(amount>0);check(dao.contributeGoal(id,amount)==1){"El aporte supera el monto restante de la meta"}}
 }
+
 fun periodRange(p:Profile?):Pair<Long,Long>{val now=System.currentTimeMillis();if(p==null)return (now-30L*86400000) to (now+1);val duration=(365.2425/payPeriodsPerYear(p.payFrequency)*86400000.0).toLong().coerceAtLeast(1);val anchor=LocalDate.ofEpochDay(p.anchorEpochDay).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli();val index=Math.floorDiv(now-anchor,duration);val start=anchor+index*duration;return start to start+duration}

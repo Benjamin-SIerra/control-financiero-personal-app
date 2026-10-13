@@ -9,7 +9,7 @@ Proyecto Android nativo **independiente**, creado desde cero. No reemplaza ni mo
 
 ## Funciones
 
-- Ingreso por sueldo y frecuencia semanal, catorcenal, quincenal o mensual.
+- Periodos de ingreso independientes con monto real, rango de fechas (inicio/fin) y frecuencia semanal, catorcenal, quincenal o mensual; conserva el histórico y permite editar o eliminar con confirmación.
 - Gastos fijos/recurrentes con frecuencia y fecha de cobro; apartado proporcional al ciclo de pago.
 - Resumen de ingreso, apartado, ahorro sugerido, gastos del periodo y saldo libre.
 - Gastos rápidos con comandos de texto: `Gasto $120 tacos` y `Tarjeta $500 comida`.
@@ -17,6 +17,10 @@ Proyecto Android nativo **independiente**, creado desde cero. No reemplaza ni mo
 - Metas con moneda, fecha objetivo y sugerencia de aporte por periodo.
 - Tipo de cambio manual para convertir montos a la moneda base (no se consulta la red).
 - Alertas preventivas por saldo libre bajo/agotado y utilización de crédito alta.
+
+### Ingresos / Periodos
+
+Cada ingreso se guarda como un registro con fechas inclusivas de inicio y fin, frecuencia, moneda base y monto real. Los rangos que se traslapan se rechazan y todos los periodos usan la misma moneda base. Al rebasar la fecha de fin, el registro permanece como histórico y la app abre un periodo nuevo sin copiar el monto anterior; queda marcado como pendiente hasta que se capture el ingreso real. El periodo vigente alimenta el saldo libre y determina qué gastos pertenecen al ciclo. Las fechas se eligen con el DatePicker de Material 3. La migración Room 1→2 conserva el ingreso de perfil existente como periodo vigente.
 
 ## Cálculo
 
