@@ -11,6 +11,22 @@ data class QuickExpense(val concept:String,val amountMinor:Long,val isCard:Boole
 fun payPeriodsPerYear(frequency:String):Double=when(frequency){"SEMANAL"->52.0;"CATORCENAL"->26.0;"QUINCENAL"->24.0;"MENSUAL"->12.0;else->error("Frecuencia de pago inválida")}
 fun chargePeriodsPerYear(frequency:String):Double=when(frequency){"SEMANAL"->52.0;"CATORCENAL"->26.0;"QUINCENAL"->24.0;"MENSUAL"->12.0;else->error("Frecuencia de cobro inválida")}
 fun toBaseMinor(amountMinor:Long,rate:Double):Long{require(amountMinor>=0 && rate>0 && rate.isFinite());return (amountMinor*rate).roundToLong()}
+
+/** Monto de cada ocurrencia del gasto recurrente, en moneda base. */
+fun fixedExpenseAmountPerOccurrence(expense:FixedExpense):Long = toBaseMinor(expense.amountMinor,expense.exchangeRate)
+
+/** Acumulado promedio mensual: ocurrencia × frecuencia anual / 12. */
+fun fixedExpenseMonthlyEquivalent(expense:FixedExpense):Long =
+ (fixedExpenseAmountPerOccurrence(expense)*chargePeriodsPerYear(expense.frequency)/12.0).roundToLong()
+
+/** Apartado desde cada pago de ingreso; distinto del monto de una ocurrencia. */
+fun fixedExpenseReservePerIncomePay(expense:FixedExpense,payFrequency:String):Long =
+ (fixedExpenseAmountPerOccurrence(expense)*chargePeriodsPerYear(expense.frequency)/payPeriodsPerYear(payFrequency)).roundToLong()
+
+/** El DatePicker entrega epoch millis UTC; se convierte por día UTC para evitar desfases. */
+fun selectedDateMillisToIsoDate(selectedDateMillis:Long):String =
+ LocalDate.ofEpochDay(Math.floorDiv(selectedDateMillis,86_400_000L)).toString()
+
 fun moneyToMinor(text:String):Long{val raw=text.trim().replace("$","").replace(" ","");val normalized=when{raw.contains(',')&&raw.contains('.')->{if(raw.lastIndexOf(',')>raw.lastIndexOf('.'))raw.replace(".","").replace(',','.')else raw.replace(",","")};raw.count{it==','}==1->{if(raw.substringAfterLast(',').length in 1..2)raw.replace(',','.')else raw.replace(",","")};else->raw};val n=normalized.toBigDecimalOrNull()?:throw IllegalArgumentException("Escribe un monto válido");require(n.signum()>=0);return n.movePointRight(2).setScale(0,java.math.RoundingMode.HALF_UP).longValueExact()}
 fun parseQuickExpense(text:String):QuickExpense{
  val match=Regex("(?i)^\\s*(gasto|tarjeta)?\\s*\\$?\\s*([0-9]+(?:[.,][0-9]{1,2})?)\\s+(.+?)\\s*$").matchEntire(text) ?: throw IllegalArgumentException("Usa: Gasto $120 tacos o Tarjeta $500 comida")
@@ -21,7 +37,7 @@ fun parseQuickExpense(text:String):QuickExpense{
 fun calculateBudget(incomeMinor:Long,payFrequency:String,fixed:List<FixedExpense>,cards:List<CreditCard>,goals:List<SavingsGoal>,expenses:List<Expense>,today:LocalDate=LocalDate.now()):BudgetResult{
  require(incomeMinor>=0)
  val pays=payPeriodsPerYear(payFrequency)
- val fixedReserve=fixed.filter{it.enabled}.sumOf{(toBaseMinor(it.amountMinor,it.exchangeRate)*chargePeriodsPerYear(it.frequency)/pays).roundToLong()}
+ val fixedReserve=fixed.filter{it.enabled}.sumOf{fixedExpenseReservePerIncomePay(it,payFrequency)}
  val cardReserve=cards.filter{it.salaryFunded}.sumOf{(toBaseMinor(it.expectedPaymentMinor,it.exchangeRate)*12.0/pays).roundToLong()}
  val goalReserve=goals.sumOf { g->
    val remaining=toBaseMinor((g.targetMinor-g.savedMinor).coerceAtLeast(0),g.exchangeRate)
