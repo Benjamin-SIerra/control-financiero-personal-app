@@ -93,7 +93,7 @@ abstract class FinanceDatabase:RoomDatabase(){
     }
    }
   }
-  val MIGRATION_2_3:Migration=object:Migration(2,3){override fun migrate(database:SupportSQLiteDatabase){database.execSQL("ALTER TABLE `goals` ADD COLUMN `status` TEXT NOT NULL DEFAULT 'ACTIVE'");database.execSQL("UPDATE `goals` SET `status`='COMPLETED' WHERE `savedMinor`>=`targetMinor'")}}
+  val MIGRATION_2_3:Migration=object:Migration(2,3){override fun migrate(database:SupportSQLiteDatabase){database.execSQL("ALTER TABLE `goals` ADD COLUMN `status` TEXT NOT NULL DEFAULT 'ACTIVE'");database.execSQL("UPDATE goals SET status='COMPLETED' WHERE savedMinor >= targetMinor")}}
   fun create(context:Context)=Room.databaseBuilder(context,FinanceDatabase::class.java,"control-financiero-personal.db").addMigrations(MIGRATION_1_2,MIGRATION_2_3).build()
  }
 }

@@ -30,4 +30,4 @@ La captura rápida es texto; la primera tarjeta guardada se asigna cuando el com
 
 ## Compilar
 
-Usar JDK 17, Android SDK 35 y Gradle 8.10.2; ejecutar `testDebugUnitTest assembleDebug`. APK debug en `app/build/outputs/apk/debug/app-debug.apk`.
+Usar JDK 17, Android SDK 35 y Gradle 8.10.2; ejecutar `testDebugUnitTest assembleDebug` y `python scripts/verify_goal_migration.py` para validar la migración 2→3 contra SQLite. APK debug en `app/build/outputs/apk/debug/app-debug.apk`.
