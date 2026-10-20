@@ -13,7 +13,7 @@ SCHEMA_V2 = ROOT / "app/schemas/com.benjamin.controlfinanciero.data.FinanceDatab
 
 def migration_sql() -> list[str]:
     source = DATABASE_SOURCE.read_text(encoding="utf-8")
-    block = source.split("val MIGRATION_2_3:", 1)[1].split("fun create(context", 1)[0]
+    block = source.split("val MIGRATION_2_3:", 1)[1].split("val MIGRATION_3_4:", 1)[0]
     literals = re.findall(r'database\.execSQL\("((?:\\.|[^"\\])*)"\)', block)
     return [json.loads(f'"{literal}"') for literal in literals]
 

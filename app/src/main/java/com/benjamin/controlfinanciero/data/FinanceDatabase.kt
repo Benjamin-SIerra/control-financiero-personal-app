@@ -29,6 +29,10 @@ data class IncomePeriod(
     val frequency:String
 )
 
+@Entity(tableName="period_balance_adjustments",foreignKeys=[ForeignKey(entity=IncomePeriod::class,parentColumns=["id"],childColumns=["periodId"],onDelete=ForeignKey.CASCADE)])
+data class PeriodBalanceAdjustment(@PrimaryKey val periodId:Long,val manualAdjustmentMinor:Long=0,val carryoverMinor:Long=0,val pendingCarryoverMinor:Long=0,val rolloverResolved:Boolean=false)
+
+
 @Entity(tableName="fixed_expenses",indices=[Index("enabled")])
 data class FixedExpense(@PrimaryKey(autoGenerate=true) val id:Long=0,val title:String,val amountMinor:Long,val currency:String,val exchangeRate:Double,val frequency:String,val dueLabel:String,val enabled:Boolean=true,val cardId:Long?=null)
 @Entity(tableName="cards",indices=[Index("name",unique=true)]) data class CreditCard(@PrimaryKey(autoGenerate=true) val id:Long=0,val name:String,val limitMinor:Long,val usedMinor:Long=0,val cutDay:Int,val dueDay:Int,val salaryFunded:Boolean,val expectedPaymentMinor:Long=0,val currency:String="MXN",val exchangeRate:Double=1.0)
@@ -43,12 +47,16 @@ data class FixedExpense(@PrimaryKey(autoGenerate=true) val id:Long=0,val title:S
  @Query("SELECT * FROM income_periods ORDER BY startEpochDay DESC,id DESC") fun incomePeriods():Flow<List<IncomePeriod>>
  @Query("SELECT * FROM income_periods ORDER BY startEpochDay DESC,id DESC") suspend fun incomePeriodsOnce():List<IncomePeriod>
  @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveIncomePeriod(period:IncomePeriod):Long
+ @Query("SELECT * FROM period_balance_adjustments WHERE periodId=:periodId") fun periodBalance(periodId:Long):Flow<PeriodBalanceAdjustment?>
+ @Query("SELECT * FROM period_balance_adjustments WHERE periodId=:periodId") suspend fun periodBalanceOnce(periodId:Long):PeriodBalanceAdjustment?
+ @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun savePeriodBalance(state:PeriodBalanceAdjustment)
  @Query("DELETE FROM income_periods WHERE id=:id") suspend fun deleteIncomePeriod(id:Long):Int
  @Query("SELECT * FROM fixed_expenses ORDER BY enabled DESC,title") fun fixed():Flow<List<FixedExpense>>
  @Insert suspend fun addFixed(x:FixedExpense):Long
  @Query("UPDATE fixed_expenses SET enabled=:enabled WHERE id=:id") suspend fun setFixedEnabled(id:Long,enabled:Boolean)
  @Query("DELETE FROM fixed_expenses WHERE id=:id") suspend fun deleteFixed(id:Long)
  @Query("SELECT * FROM expenses WHERE dateEpochMillis>=:from AND dateEpochMillis<:to ORDER BY dateEpochMillis DESC") fun expenses(from:Long,to:Long):Flow<List<Expense>>
+ @Query("SELECT * FROM expenses WHERE dateEpochMillis>=:from AND dateEpochMillis<:to ORDER BY dateEpochMillis DESC") suspend fun expensesOnce(from:Long,to:Long):List<Expense>
  @Query("SELECT COALESCE(SUM(amountMinor),0) FROM expenses WHERE dateEpochMillis>=:from AND dateEpochMillis<:to") fun spent(from:Long,to:Long):Flow<Long>
  @Insert suspend fun addExpense(e:Expense):Long
  @Query("SELECT * FROM cards ORDER BY name") fun cards():Flow<List<CreditCard>>
@@ -65,7 +73,7 @@ data class FixedExpense(@PrimaryKey(autoGenerate=true) val id:Long=0,val title:S
  @Query("DELETE FROM goals WHERE id=:id") suspend fun deleteGoal(id:Long)
 }
 
-@Database(entities=[Profile::class,IncomePeriod::class,FixedExpense::class,CreditCard::class,Expense::class,CardPayment::class,SavingsGoal::class],version=3,exportSchema=true)
+@Database(entities=[Profile::class,IncomePeriod::class,PeriodBalanceAdjustment::class,FixedExpense::class,CreditCard::class,Expense::class,CardPayment::class,SavingsGoal::class],version=4,exportSchema=true)
 abstract class FinanceDatabase:RoomDatabase(){
  abstract fun dao():FinanceDao
  companion object {
@@ -94,6 +102,7 @@ abstract class FinanceDatabase:RoomDatabase(){
    }
   }
   val MIGRATION_2_3:Migration=object:Migration(2,3){override fun migrate(database:SupportSQLiteDatabase){database.execSQL("ALTER TABLE `goals` ADD COLUMN `status` TEXT NOT NULL DEFAULT 'ACTIVE'");database.execSQL("UPDATE goals SET status='COMPLETED' WHERE savedMinor >= targetMinor")}}
-  fun create(context:Context)=Room.databaseBuilder(context,FinanceDatabase::class.java,"control-financiero-personal.db").addMigrations(MIGRATION_1_2,MIGRATION_2_3).build()
+  val MIGRATION_3_4:Migration=object:Migration(3,4){override fun migrate(database:SupportSQLiteDatabase){database.execSQL("CREATE TABLE IF NOT EXISTS `period_balance_adjustments` (`periodId` INTEGER NOT NULL, `manualAdjustmentMinor` INTEGER NOT NULL, `carryoverMinor` INTEGER NOT NULL, `pendingCarryoverMinor` INTEGER NOT NULL, `rolloverResolved` INTEGER NOT NULL, PRIMARY KEY(`periodId`), FOREIGN KEY(`periodId`) REFERENCES `income_periods`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE)")}}
+  fun create(context:Context)=Room.databaseBuilder(context,FinanceDatabase::class.java,"control-financiero-personal.db").addMigrations(MIGRATION_1_2,MIGRATION_2_3,MIGRATION_3_4).build()
  }
 }

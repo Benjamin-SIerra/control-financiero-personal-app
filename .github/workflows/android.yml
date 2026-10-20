@@ -1,0 +1,30 @@
+name: Android CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Run unit tests and debug build
+        run: ./gradlew testDebugUnitTest assembleDebug --no-daemon
+      - name: Validate Room migrations
+        run: |
+          python3 scripts/verify_goal_migration.py
+          python3 scripts/verify_period_balance_migration.py

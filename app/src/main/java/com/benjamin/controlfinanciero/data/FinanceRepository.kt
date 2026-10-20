@@ -14,6 +14,7 @@ class FinanceRepository(private val db:FinanceDatabase){
  val fixed:Flow<List<FixedExpense>> = dao.fixed()
  val cards:Flow<List<CreditCard>> = dao.cards()
  val goals:Flow<List<SavingsGoal>> = dao.goals()
+ fun periodBalance(periodId:Long):Flow<PeriodBalanceAdjustment?> = dao.periodBalance(periodId)
 
  fun expenses(period:IncomePeriod?,p:Profile?):Flow<List<Expense>>{
   val zone=ZoneId.systemDefault()
@@ -41,7 +42,12 @@ class FinanceRepository(private val db:FinanceDatabase){
    val normalizedCurrency=currency.uppercase()
    val old=dao.profileOnce()
    require(old==null||normalizedCurrency==old.currency){"Los periodos deben usar la moneda base configurada (${old?.currency})"}
-   dao.saveIncomePeriod(IncomePeriod(id=id,startEpochDay=startEpochDay,endEpochDay=endEpochDay,incomeMinor=amount,currency=normalizedCurrency,frequency=frequency))
+   val savedId=dao.saveIncomePeriod(IncomePeriod(id=id,startEpochDay=startEpochDay,endEpochDay=endEpochDay,incomeMinor=amount,currency=normalizedCurrency,frequency=frequency))
+   val persistedId=if(id==0L)savedId else id
+   if(dao.periodBalanceOnce(persistedId)==null){
+    val newPeriod=IncomePeriod(id=persistedId,startEpochDay=startEpochDay,endEpochDay=endEpochDay,incomeMinor=amount,currency=normalizedCurrency,frequency=frequency)
+    dao.savePeriodBalance(makeRolloverState(newPeriod,all.filter{it.id!=id}+newPeriod,LocalDate.now()))
+   }
    val today=LocalDate.now().toEpochDay()
    if(old==null||today in startEpochDay..endEpochDay)dao.saveProfile(Profile(incomeMinor=amount,currency=normalizedCurrency,payFrequency=frequency,anchorEpochDay=startEpochDay).copy(id=old?.id?:1))
   }
@@ -51,16 +57,59 @@ class FinanceRepository(private val db:FinanceDatabase){
   val todayEpoch=today.toEpochDay()
   db.withTransaction{
    val periods=dao.incomePeriodsOnce()
-   if(periods.any{it.startEpochDay<=todayEpoch&&it.endEpochDay>=todayEpoch})return@withTransaction
+   val active=periods.filter{it.startEpochDay<=todayEpoch&&it.endEpochDay>=todayEpoch}.maxByOrNull{it.startEpochDay}
+   if(active!=null){
+    val state=dao.periodBalanceOnce(active.id)
+    if(state==null||!state.rolloverResolved)dao.savePeriodBalance(makeRolloverState(active,periods,today))
+    return@withTransaction
+   }
    if(periods.any{it.startEpochDay>todayEpoch})return@withTransaction
    val previous=periods.filter{it.endEpochDay<todayEpoch}.maxByOrNull{it.endEpochDay}
    val profile=dao.profileOnce()
    val frequency=previous?.frequency?:profile?.payFrequency?:"QUINCENAL"
    val currency=previous?.currency?:profile?.currency?:"MXN"
    val start=nextIncomePeriodStart(todayEpoch,previous?.endEpochDay)
-   dao.saveIncomePeriod(IncomePeriod(startEpochDay=start,endEpochDay=defaultIncomePeriodEnd(start,frequency),incomeMinor=0,currency=currency,frequency=frequency))
+   val newPeriod=IncomePeriod(startEpochDay=start,endEpochDay=defaultIncomePeriodEnd(start,frequency),incomeMinor=0,currency=currency,frequency=frequency)
+   val newId=dao.saveIncomePeriod(newPeriod)
+   dao.savePeriodBalance(makeRolloverState(newPeriod.copy(id=newId),periods+newPeriod.copy(id=newId),today))
   }
  }
+
+ private suspend fun makeRolloverState(period:IncomePeriod,periods:List<IncomePeriod>,today:LocalDate):PeriodBalanceAdjustment{
+  val previous=periods.filter{it.id!=period.id&&it.endEpochDay<period.startEpochDay}.maxByOrNull{it.endEpochDay}
+  val active=today.toEpochDay() in period.startEpochDay..period.endEpochDay
+  if(!active||previous==null)return PeriodBalanceAdjustment(period.id,rolloverResolved=true)
+  val previousBalance=freeBalanceSnapshot(previous)
+  val pending=previousBalance.coerceAtLeast(0L)
+  return PeriodBalanceAdjustment(periodId=period.id,pendingCarryoverMinor=pending,rolloverResolved=pending==0L)
+ }
+
+ private suspend fun freeBalanceSnapshot(period:IncomePeriod):Long{
+  val zone=ZoneId.systemDefault()
+  val from=LocalDate.ofEpochDay(period.startEpochDay).atStartOfDay(zone).toInstant().toEpochMilli()
+  val to=LocalDate.ofEpochDay(period.endEpochDay).plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+  val expenses=dao.expensesOnce(from,to)
+  val state=dao.periodBalanceOnce(period.id)?:PeriodBalanceAdjustment(period.id,rolloverResolved=true)
+  return calculateBudget(period.incomeMinor,period.frequency,fixed.first(),cards.first(),goals.first(),expenses,LocalDate.ofEpochDay(period.endEpochDay),state.carryoverMinor,state.manualAdjustmentMinor).free
+ }
+
+ suspend fun decideCarryover(periodId:Long,accept:Boolean){db.withTransaction{
+  val today=LocalDate.now().toEpochDay();val period=dao.incomePeriodsOnce().firstOrNull{it.id==periodId&&today in it.startEpochDay..it.endEpochDay}?:error("El arrastre solo se puede decidir en el periodo activo")
+  val state=dao.periodBalanceOnce(period.id)?:error("No hay remanente pendiente")
+  require(!state.rolloverResolved&&state.pendingCarryoverMinor>0){"No hay remanente pendiente de decidir"}
+  dao.savePeriodBalance(state.copy(carryoverMinor=if(accept)state.pendingCarryoverMinor else 0L,pendingCarryoverMinor=0L,rolloverResolved=true))
+ }}
+
+ suspend fun setFreeBalanceForCurrentPeriod(periodId:Long,targetFreeMinor:Long){db.withTransaction{
+  val today=LocalDate.now().toEpochDay();val period=dao.incomePeriodsOnce().firstOrNull{it.id==periodId&&today in it.startEpochDay..it.endEpochDay}?:error("El ajuste solo aplica al periodo activo")
+  val state=dao.periodBalanceOnce(period.id)?:PeriodBalanceAdjustment(period.id,rolloverResolved=true)
+  require(state.pendingCarryoverMinor==0L||state.rolloverResolved){"Resuelve primero el remanente pendiente"}
+  val zone=ZoneId.systemDefault();val from=LocalDate.ofEpochDay(period.startEpochDay).atStartOfDay(zone).toInstant().toEpochMilli();val to=LocalDate.ofEpochDay(period.endEpochDay).plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+  val expenses=dao.expensesOnce(from,to)
+  val baseFree=calculateBudget(period.incomeMinor,period.frequency,fixed.first(),cards.first(),goals.first(),expenses,LocalDate.now(),carryoverMinor=0,manualAdjustmentMinor=0).free
+  val adjustment=adjustmentToReachFreeBalance(baseFree,state.carryoverMinor,targetFreeMinor)
+  dao.savePeriodBalance(state.copy(manualAdjustmentMinor=adjustment))
+ }}
 
  suspend fun deleteIncomePeriod(id:Long)=db.withTransaction{dao.deleteIncomePeriod(id)}
 

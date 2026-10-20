@@ -1,6 +1,19 @@
 .gradle/
 **/build/
+.kotlin/
 local.properties
+# Credenciales y configuración solo local: nunca se suben al repositorio.
+.env
+.env.*
+!.env.example
+secrets.properties
+keys.properties
+*.keystore
+*.jks
+*.p12
+*.pem
+service-account*.json
+google-services.json
 .idea/
 *.iml
 *.apk

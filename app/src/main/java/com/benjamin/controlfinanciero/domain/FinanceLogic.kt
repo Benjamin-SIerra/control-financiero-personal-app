@@ -28,13 +28,24 @@ fun selectedDateMillisToIsoDate(selectedDateMillis:Long):String =
  LocalDate.ofEpochDay(Math.floorDiv(selectedDateMillis,86_400_000L)).toString()
 
 fun moneyToMinor(text:String):Long{val raw=text.trim().replace("$","").replace(" ","");val normalized=when{raw.contains(',')&&raw.contains('.')->{if(raw.lastIndexOf(',')>raw.lastIndexOf('.'))raw.replace(".","").replace(',','.')else raw.replace(",","")};raw.count{it==','}==1->{if(raw.substringAfterLast(',').length in 1..2)raw.replace(',','.')else raw.replace(",","")};else->raw};val n=normalized.toBigDecimalOrNull()?:throw IllegalArgumentException("Escribe un monto válido");require(n.signum()>=0);return n.movePointRight(2).setScale(0,java.math.RoundingMode.HALF_UP).longValueExact()}
+fun moneyToMinorSigned(text:String):Long{val raw=text.trim();return if(raw.startsWith("-")) -moneyToMinor(raw.drop(1)) else moneyToMinor(raw)}
 fun parseQuickExpense(text:String):QuickExpense{
  val match=Regex("(?i)^\\s*(gasto|tarjeta)?\\s*\\$?\\s*([0-9]+(?:[.,][0-9]{1,2})?)\\s+(.+?)\\s*$").matchEntire(text) ?: throw IllegalArgumentException("Usa: Gasto $120 tacos o Tarjeta $500 comida")
  val amount=moneyToMinor(match.groupValues[2]);require(amount>0){"El gasto debe ser mayor que cero"}
  val concept=match.groupValues[3].trim();require(concept.isNotBlank())
  return QuickExpense(concept,amount,match.groupValues[1].equals("tarjeta",true))
 }
-fun calculateBudget(incomeMinor:Long,payFrequency:String,fixed:List<FixedExpense>,cards:List<CreditCard>,goals:List<SavingsGoal>,expenses:List<Expense>,today:LocalDate=LocalDate.now()):BudgetResult{
+val EXPENSE_CATEGORIES=listOf("Alimentos","Transporte","Servicios","Ocio","Salud","Otros")
+fun parseStructuredExpense(category:String,amountText:String):QuickExpense{
+ require(category in EXPENSE_CATEGORIES){"Selecciona una categoría de la lista"}
+ val amount=moneyToMinor(amountText);require(amount>0){"El gasto debe ser mayor que cero"}
+ return QuickExpense(category,amount,false)
+}
+fun pendingCarryoverFrom(previousFreeMinor:Long):Long = previousFreeMinor.coerceAtLeast(0L)
+fun adjustmentToReachFreeBalance(baseFreeMinor:Long,carryoverMinor:Long,targetFreeMinor:Long):Long =
+ targetFreeMinor-baseFreeMinor-carryoverMinor
+
+fun calculateBudget(incomeMinor:Long,payFrequency:String,fixed:List<FixedExpense>,cards:List<CreditCard>,goals:List<SavingsGoal>,expenses:List<Expense>,today:LocalDate=LocalDate.now(),carryoverMinor:Long=0,manualAdjustmentMinor:Long=0):BudgetResult{
  require(incomeMinor>=0)
  val pays=payPeriodsPerYear(payFrequency)
  val fixedReserve=fixed.filter{it.enabled}.sumOf{fixedExpenseReservePerIncomePay(it,payFrequency)}
@@ -47,7 +58,7 @@ fun calculateBudget(incomeMinor:Long,payFrequency:String,fixed:List<FixedExpense
  }
  val spent=expenses.sumOf{toBaseMinor(it.amountMinor,it.exchangeRate)}
  val reserve=fixedReserve+cardReserve
- return BudgetResult(incomeMinor,reserve,goalReserve,spent,incomeMinor-reserve-goalReserve-spent)
+ return BudgetResult(incomeMinor,reserve,goalReserve,spent,incomeMinor-reserve-goalReserve-spent+carryoverMinor+manualAdjustmentMinor)
 }
 
 fun categoryFor(concept:String):String=when{listOf("taco","comida","super","restaurante","cafe").any{concept.contains(it,true)}->"Alimentos";listOf("gas","uber","taxi","camion","transporte").any{concept.contains(it,true)}->"Transporte";listOf("luz","agua","renta","internet","telefono").any{concept.contains(it,true)}->"Servicios";else->"Otros"}

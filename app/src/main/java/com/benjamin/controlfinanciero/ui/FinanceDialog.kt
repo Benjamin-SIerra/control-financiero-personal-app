@@ -20,11 +20,14 @@ import com.benjamin.controlfinanciero.data.IncomePeriod
 import com.benjamin.controlfinanciero.data.SavingsGoal
 import com.benjamin.controlfinanciero.domain.defaultIncomePeriodEnd
 import com.benjamin.controlfinanciero.domain.selectedDateMillisToIsoDate
+import com.benjamin.controlfinanciero.domain.EXPENSE_CATEGORIES
+import com.benjamin.controlfinanciero.domain.moneyToMinor
 
-@Composable fun FinanceDialog(kind:String,baseCurrency:String,onClose:()->Unit,onSave:(Map<String,String>)->Unit,incomePeriod:IncomePeriod?=null,goal:SavingsGoal?=null,defaultStartEpochDay:Long?=null,defaultFrequency:String="QUINCENAL"){
- val v=remember(kind,incomePeriod?.id,goal?.id){mutableStateMapOf<String,String>()};var salary by remember(kind){mutableStateOf(true)};var category by remember(kind){mutableStateOf("Otros")}
- LaunchedEffect(kind,baseCurrency,incomePeriod?.id,goal?.id,defaultStartEpochDay,defaultFrequency){
-  v.clear();v["currency"]=goal?.currency?:incomePeriod?.currency?:baseCurrency;v["rate"]=goal?.exchangeRate?.toString()?:if(v["currency"]==baseCurrency)"1" else "";v["frequency"]=incomePeriod?.frequency?:defaultFrequency;v["deadline"]=goal?.deadlineEpochDay?.let{LocalDate.ofEpochDay(it).toString()}?:LocalDate.now().plusMonths(3).toString();v["category"]="Otros"
+@Composable fun FinanceDialog(kind:String,baseCurrency:String,onClose:()->Unit,onSave:(Map<String,String>)->Unit,incomePeriod:IncomePeriod?=null,goal:SavingsGoal?=null,defaultStartEpochDay:Long?=null,defaultFrequency:String="QUINCENAL",currentBalanceMinor:Long=0,hasCards:Boolean=false,firstCardName:String?=null){
+ val v=remember(kind,incomePeriod?.id,goal?.id){mutableStateMapOf<String,String>()};var salary by remember(kind){mutableStateOf(true)};var category by remember(kind){mutableStateOf("")};var isCard by remember(kind){mutableStateOf(false)}
+ LaunchedEffect(kind,baseCurrency,incomePeriod?.id,goal?.id,defaultStartEpochDay,defaultFrequency,currentBalanceMinor){
+  v.clear();category="";isCard=false;v["currency"]=goal?.currency?:incomePeriod?.currency?:baseCurrency;v["rate"]=goal?.exchangeRate?.toString()?:if(v["currency"]==baseCurrency)"1" else "";v["frequency"]=incomePeriod?.frequency?:defaultFrequency;v["deadline"]=goal?.deadlineEpochDay?.let{LocalDate.ofEpochDay(it).toString()}?:LocalDate.now().plusMonths(3).toString();v["category"]="";v["isCard"]="false"
+  if(kind=="free_balance")v["amount"]=String.format(java.util.Locale.US,"%.2f",currentBalanceMinor/100.0)
   if(kind=="goal") {v["id"]=goal?.id?.toString().orEmpty();v["name"]=goal?.name.orEmpty();v["amount"]=goal?.targetMinor?.let{String.format(java.util.Locale.US,"%.2f",it/100.0)}.orEmpty()}
   if(kind=="income_period"){
    val start=incomePeriod?.startEpochDay?.let(LocalDate::ofEpochDay)?:defaultStartEpochDay?.let(LocalDate::ofEpochDay)?:LocalDate.now()
@@ -33,17 +36,19 @@ import com.benjamin.controlfinanciero.domain.selectedDateMillisToIsoDate
   }
  }
  val title=when(kind){"income_period"->if(incomePeriod==null)"Nuevo periodo de ingreso" else "Editar periodo de ingreso";"fixed"->"Gasto recurrente";"expense"->"Registrar gasto";"card"->"Nueva tarjeta";"pay"->"Registrar abono";"goal"->if(goal==null)"Nueva meta" else "Editar meta";else->"Aportación a meta"}
+ val expenseValid=kind!="expense"||(category in EXPENSE_CATEGORIES&&runCatching{moneyToMinor(v["amount"].orEmpty())>0}.getOrDefault(false))
  AlertDialog(onDismissRequest=onClose,title={Text(title,fontWeight=FontWeight.SemiBold)},text={Column(Modifier.fillMaxWidth().heightIn(max=560.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(10.dp)){
   when(kind){
    "income_period"->{Text("Cada periodo conserva su propio ingreso real y rango de fechas.",color=Muted,fontSize=12.sp);Field("Ingreso real del periodo","amount",v,true);Field("Moneda base (igual para todos los periodos)","currency",v);Text("Frecuencia del ciclo",color=Muted,fontSize=12.sp);FrequencyChoice(v);DatePickerField("Fecha de inicio","start",v);DatePickerField("Fecha de fin","end",v)}
    "fixed"->{Field("Concepto (renta, luz…)","name",v);Field("Monto","amount",v,true);CurrencyRateFields(v,baseCurrency);Text("Frecuencia del cobro",color=Muted,fontSize=12.sp);FrequencyChoice(v);Field("Fecha (ej. día 15, viernes)","due",v)}
-   "expense"->{Field("Comando (Gasto $120 tacos)","quick",v);Text("También puedes escribir: Tarjeta $500 comida. Se usará la primera tarjeta guardada.",color=Muted,fontSize=11.sp);CurrencyRateFields(v,baseCurrency);Text("Categoría",color=Muted,fontSize=12.sp);Column{listOf("Alimentos","Transporte","Servicios","Ocio","Salud","Otros").chunked(3).forEach{row->Row{row.forEach{c->FilterChip(selected=category==c,onClick={category=c;v["category"]=c},label={Text(c,fontSize=11.sp)})}}}}}
+   "expense"->{Text("Selecciona una categoría obligatoria:",color=Muted,fontSize=12.sp);Column{EXPENSE_CATEGORIES.chunked(3).forEach{row->Row{row.forEach{c->FilterChip(selected=category==c,onClick={category=c;v["category"]=c},label={Text(c,fontSize=11.sp)})}}}};Field("Monto gastado (mayor a $0)","amount",v,true);CurrencyRateFields(v,baseCurrency);if(hasCards){FilterChip(selected=isCard,onClick={val selected=!isCard;isCard=selected;v["isCard"]=selected.toString()},label={Text(if(isCard)"Tarjeta · ${firstCardName?:""}" else "Pagar en efectivo")})}}
+   "free_balance"->{Text("Define el saldo real para este periodo. Solo se ajustará el ciclo activo; el historial y los ciclos futuros no cambian.",color=Muted,fontSize=12.sp);Field("Nuevo saldo libre (${baseCurrency}) · admite negativo","amount",v,true)}
    "card"->{Field("Alias o banco (sin número)","name",v);Field("Límite de crédito","limit",v,true);Field("Día de corte (1-31)","cut",v,true);Field("Día límite de pago (1-31)","due",v,true);CurrencyRateFields(v,baseCurrency);Text("¿El pago saldrá del salario registrado?",fontSize=12.sp,color=Muted);Row{FilterChip(selected=salary,onClick={salary=true;v["salary"]="true"},label={Text("Sí, del salario")});FilterChip(selected=!salary,onClick={salary=false;v["salary"]="false"},label={Text("No, aparte")})};v["salary"]=salary.toString();if(salary)Field("Pago mensual estimado","payment",v,true)}
    "goal"->{Field("Nombre de la meta","name",v);Field("Monto objetivo","amount",v,true);CurrencyRateFields(v,baseCurrency);Text("La tasa queda guardada con la meta para calcular su apartado en moneda base.",color=Muted,fontSize=11.sp);DeadlinePicker(v)}
    "contribute"->{Text("${goal?.name.orEmpty()} · ${goal?.currency?:baseCurrency}",color=Muted,fontSize=12.sp);Field("Monto a aportar (${goal?.currency?:baseCurrency})","amount",v,true)}
    else->Field("Monto","amount",v,true)
   }
- }},confirmButton={Button(onClick={onSave(v.toMap()+mapOf("salary" to salary.toString(),"category" to category))},colors=ButtonDefaults.buttonColors(containerColor=Gold,contentColor=Color.Black),shape=RoundedCornerShape(12.dp)){Text("Guardar",fontWeight=FontWeight.Bold)}},dismissButton={TextButton(onClick=onClose){Text("Cancelar",color=Muted)}})
+ }},confirmButton={Button(onClick={onSave(v.toMap()+mapOf("salary" to salary.toString(),"category" to category,"isCard" to isCard.toString()))},enabled=expenseValid,colors=ButtonDefaults.buttonColors(containerColor=Gold,contentColor=Color.Black,disabledContainerColor=Muted.copy(alpha=.35f),disabledContentColor=Color.Black.copy(alpha=.5f)),shape=RoundedCornerShape(12.dp)){Text("Guardar",fontWeight=FontWeight.Bold)}},dismissButton={TextButton(onClick=onClose){Text("Cancelar",color=Muted)}})
 }
 
 @Composable private fun CurrencyRateFields(v:MutableMap<String,String>,baseCurrency:String){
